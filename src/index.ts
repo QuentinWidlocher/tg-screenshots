@@ -40,11 +40,11 @@ const { values: args } = parseArgs({
 		chatId: {
 			type: "string",
 		},
-		alwaysSend: {
-			type: "boolean",
-		},
 		noInitialScan: {
 			type: "boolean",
+		},
+		threadNameFile: {
+			type: "string",
 		},
 	},
 	allowPositionals: config.NODE_ENV !== "production",
@@ -55,10 +55,10 @@ if (args.help) {
 	console.log(`
 Telegram Screenshots bot
 
---chatId        id of the chat to send to (the bot will give you when adding it to the chat)
---directory     (default: ".") path to your screenshot folder
---alwaysSend    (default: false) send even if the new file was already sent (won't trigger on launch)
---noInitialScan (default: false )don't scan for unsent screenshots at launch
+--chatId          id of the chat to send to (the bot will give you when adding it to the chat)
+--threadNameFile  (optional) path to a .txt file containing a name, to send to the right thread
+--directory       (default: ".") path to your screenshot folder
+--noInitialScan   (default: false) don't scan for unsent screenshots at launch
    `);
 
 	process.exit(0);
@@ -96,7 +96,7 @@ if (!args.chatId) {
 					args.directory,
 					fileChange.filename,
 					args.chatId,
-					args.alwaysSend,
+					args.threadNameFile,
 				);
 			} catch (e) {
 				console.error(e);

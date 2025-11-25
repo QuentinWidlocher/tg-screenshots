@@ -26,8 +26,28 @@ You'll need to install [Bun](https://bun.com/) to compile the executable.
 
 ## How I use it
 
-I made this bot specifically for myself, I want to have access to my screenshots at any time so this is what I did :
+I made this bot specifically for myself.
 
+I wanted to be able to screenshot my games with my controller and have access to the screenshots at any time so this is what I did :
+
+- Created a group with topics enables
+- Added the bot with topic management rights
 - Ran this tool on my Windows machine in `Pictures\Screenshots`
 - Binded a shortcut on my controller (with reWASD) to `WIN+PrtScr` so it saves the screenshot in the folder above
+- Added a simple script to my game launcher [Playnite](https://playnite.link/) to write the running game name in `Pictures\game.txt`
+
+*After game is started running.*
+```powershell
+$game.name | Out-File -FilePath C:\Users\<me>\Pictures\Screenshots\game.txt
+```
+
+*After game has stopped running.*
+```powershell
+"" | Out-File -FilePath C:\Users\<me>\Pictures\Screenshots\game.txt
+```
+
 - Added a task in the Task Scheduler to run the tool hidden at startup
+
+```
+tgscreenshots --chatId=-0000000000000 --threadNameFile=game.txt
+```

@@ -5,15 +5,25 @@ import {
 	getHash,
 	getScreenshotByHash,
 	getSentScreenshots,
+	getThreadByName,
 	storeScreenshot,
+	storeThread,
+	type Thread,
 } from "./database";
 
-function sendScreenshot(file: Bun.BunFile, chatId: string) {
-	console.log("Sending", file.name, "to", chatId);
+function sendScreenshot(file: Bun.BunFile, chatId: string, threadId?: number) {
+	console.log(
+		"Sending",
+		file.name,
+		"to",
+		chatId,
+		threadId ? `in thread ${threadId}` : undefined,
+	);
 
 	return bot.api.sendDocument({
 		document: file,
 		chat_id: chatId,
+		message_thread_id: threadId,
 	});
 }
 
@@ -21,28 +31,23 @@ export async function sendAndStoreScreenshot(
 	dir: string,
 	fileName: string,
 	chatId: string,
-	alwaysSend = false,
+	threadNameFilePath?: string,
 ) {
 	const file = Bun.file(path.join(dir, fileName));
 	const sentScreenshot = getScreenshotByHash(await getHash(file));
-	if (sentScreenshot) {
-		if (!alwaysSend) {
-			console.log("Screenshot", file.name, "already sent.");
-			return;
-		}
 
-		console.log(
-			"Screenshot",
-			file.name,
-			"already sent but we --alwaysSend, so forwarding...",
-		);
-		await bot.api.forwardMessage({
-			from_chat_id: chatId,
-			message_id: sentScreenshot.messageId,
-			chat_id: chatId,
-		});
+	if (sentScreenshot) {
+		return;
 	} else {
-		const { message_id: messageId } = await sendScreenshot(file, chatId);
+		const thread = threadNameFilePath
+			? await getOrCreateThread(threadNameFilePath, chatId)
+			: undefined;
+
+		const { message_id: messageId } = await sendScreenshot(
+			file,
+			chatId,
+			thread?.id,
+		);
 		await storeScreenshot(messageId, file);
 	}
 }
@@ -79,4 +84,49 @@ export async function sendAllUnsentFile(dir: string, chatId: string) {
 			await storeScreenshot(messageId, file, hash);
 		}),
 	);
+}
+
+async function getCurrentThreadName(threadNameFilePath: string) {
+	try {
+		const file = Bun.file(threadNameFilePath);
+
+		const text = await file.text();
+
+		return text.split("\n").at(0)?.trim() || null;
+	} catch (e) {
+		if (e instanceof Error && "errno" in e && e.errno === -2) {
+			console.error(`The appNameFile does not exist at ${threadNameFilePath}.`);
+			return null;
+		}
+
+		throw e;
+	}
+}
+
+async function getOrCreateThread(
+	threadNameFilePath: string,
+	chatId: string,
+): Promise<Thread | undefined> {
+	const currentThreadName = await getCurrentThreadName(threadNameFilePath);
+
+	if (currentThreadName) {
+		const thread = getThreadByName(currentThreadName);
+		if (thread) {
+			return thread;
+		} else {
+			const createdThread = await bot.api.createForumTopic({
+				chat_id: chatId,
+				name: currentThreadName,
+			});
+
+			const storedThread = {
+				id: createdThread.message_thread_id,
+				name: currentThreadName,
+			};
+
+			storeThread(storedThread);
+
+			return storedThread;
+		}
+	}
 }
