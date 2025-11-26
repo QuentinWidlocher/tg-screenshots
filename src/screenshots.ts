@@ -1,5 +1,7 @@
 import path from "node:path";
 import { Glob } from "bun";
+import type { TelegramMessage } from "gramio";
+import type { Args } from ".";
 import { bot } from "./bot";
 import {
 	getHash,
@@ -11,7 +13,15 @@ import {
 	type Thread,
 } from "./database";
 
-function sendScreenshot(file: Bun.BunFile, chatId: string, threadId?: number) {
+async function sendScreenshot(
+	file: Bun.BunFile,
+	chatId: string,
+	{
+		sendAsPhoto,
+		sendAsDocument,
+	}: { sendAsPhoto: boolean; sendAsDocument: boolean },
+	threadId?: number,
+): Promise<TelegramMessage[]> {
 	console.log(
 		"Sending",
 		file.name,
@@ -20,40 +30,67 @@ function sendScreenshot(file: Bun.BunFile, chatId: string, threadId?: number) {
 		threadId ? `in thread ${threadId}` : undefined,
 	);
 
-	return bot.api.sendDocument({
-		document: file,
-		chat_id: chatId,
-		message_thread_id: threadId,
-	});
+	const messages: TelegramMessage[] = [];
+
+	if (sendAsPhoto) {
+		messages.push(
+			await bot.api.sendPhoto({
+				chat_id: chatId,
+				photo: file,
+				message_thread_id: threadId,
+			}),
+		);
+	}
+
+	if (sendAsDocument) {
+		messages.push(
+			await bot.api.sendDocument({
+				chat_id: chatId,
+				document: file,
+				message_thread_id: threadId,
+			}),
+		);
+	}
+
+	return messages;
 }
 
 export async function sendAndStoreScreenshot(
-	dir: string,
 	fileName: string,
-	chatId: string,
-	threadNameFilePath?: string,
+	{ directory, chatId, sendAsDocument, sendAsPhoto, threadNameFile }: Args,
 ) {
-	const file = Bun.file(path.join(dir, fileName));
+	const file = Bun.file(path.join(directory, fileName));
 	const sentScreenshot = getScreenshotByHash(await getHash(file));
 
 	if (sentScreenshot) {
 		return;
 	} else {
-		const thread = threadNameFilePath
-			? await getOrCreateThread(threadNameFilePath, chatId)
+		const thread = threadNameFile
+			? await getOrCreateThread(threadNameFile, chatId)
 			: undefined;
 
-		const { message_id: messageId } = await sendScreenshot(
+		const messages = await sendScreenshot(
 			file,
 			chatId,
+			{ sendAsDocument, sendAsPhoto },
 			thread?.id,
 		);
-		await storeScreenshot(messageId, file);
+
+		await Promise.all(
+			messages.map(({ message_id: messageId }) =>
+				storeScreenshot(messageId, file),
+			),
+		);
 	}
 }
 
-export async function sendAllUnsentFile(dir: string, chatId: string) {
-	console.log("Scanning", dir, "for screenshots to send to", chatId);
+export async function sendAllUnsentFile(args: Args) {
+	console.log(
+		"Scanning",
+		args.directory,
+		"for screenshots to send to",
+		args.chatId,
+	);
 	const sentScreenshotsHashes = getSentScreenshots().map((s) => s.hash);
 
 	console.log(
@@ -63,12 +100,12 @@ export async function sendAllUnsentFile(dir: string, chatId: string) {
 	);
 
 	const fileNames = await Array.fromAsync(
-		new Glob("**/*.{png,jpg}").scan({ cwd: dir }),
+		new Glob("**/*.{png,jpg}").scan({ cwd: args.directory }),
 	);
 
 	const files = await Promise.all(
 		fileNames.map(async (fileName) => {
-			const file = Bun.file(path.join(dir, fileName));
+			const file = Bun.file(path.join(args.directory, fileName));
 			return [await getHash(file), file] as const;
 		}),
 	);
@@ -79,9 +116,16 @@ export async function sendAllUnsentFile(dir: string, chatId: string) {
 	console.log("Found", unsentFiles.length, "not yet sent screenshots");
 
 	return Promise.all(
-		unsentFiles.map(async ([hash, file]) => {
-			const { message_id: messageId } = await sendScreenshot(file, chatId);
-			await storeScreenshot(messageId, file, hash);
+		unsentFiles.flatMap(async ([hash, file]) => {
+			const messages = await sendScreenshot(file, args.chatId, {
+				sendAsDocument: args.sendAsDocument,
+				sendAsPhoto: args.sendAsPhoto,
+			});
+
+			for (const { message_id: messageId } of messages) {
+				// Is not actually async so no need to map over Promises
+				await storeScreenshot(messageId, file, hash);
+			}
 		}),
 	);
 }
